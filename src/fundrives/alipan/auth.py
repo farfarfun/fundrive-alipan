@@ -18,7 +18,7 @@ class AliPanAuth:
         client_secret: str,
         refresh_token: str = None,
     ):
-        self.openapi_domain = "https://openapi.aliyundrive.com"
+        self.openapi_domain = "https://openapi.alipan.com"
         assert client_id and client_secret, "client_id and client_secret must be set"
 
         self._session = requests.Session()

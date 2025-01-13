@@ -1,0 +1,13 @@
+[project]
+name = "fundrive-alipan"
+version = "1.0.1"
+description = "fundrive-alipan"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [ "funutil>=1.0.19", "qrcode>=7.4.2",]
+[[project.authors]]
+name = "niuliangtao"
+email = "farfarfun@qq.com"
+
+[tool.setuptools]
+license-files = []

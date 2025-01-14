@@ -3,6 +3,7 @@ from typing import List, Optional
 
 import requests
 from fundrives.alipan import AliPanAuth
+from funfile import file_tqdm_bar
 from funget import simple_download, single_upload
 from funsecret import read_secret
 from funutil import getLogger
@@ -244,7 +245,7 @@ class FileUpload(FileInfo):
         data = {"drive_id": self.drive_id, "file_id": file_id, "upload_id": upload_id}
         return self.post(url, payload=data)
 
-    def upload_file(self, file_id, filepath):
+    def upload_file2(self, file_id, filepath):
         filesize = os.path.getsize(filepath)
         info = self.create_file(file_id, os.path.basename(filepath), size=filesize)
 
@@ -261,6 +262,24 @@ class FileUpload(FileInfo):
             headers=self.get_header(),
         )
         self.complete_upload(file_id=info["file_id"], upload_id=info["upload_id"])
+
+    def upload_file(self, file_id, filepath, chunk_size=512 * 1024):
+        filesize = os.path.getsize(filepath)
+        part_info = self.create_file(file_id, os.path.basename(filepath), size=filesize)
+        """上传数据"""
+        with open(filepath, "rb") as f:
+            with file_tqdm_bar(
+                path=filepath,
+                total=filesize,
+            ) as progress_bar:
+                for i in range(len(part_info["part_info_list"])):
+                    part_info_item = part_info["part_info_list"][i]
+                    data = f.read(chunk_size)
+                    resp = requests.put(data=data, url=part_info_item.upload_url)
+                    if resp.status_code == 403:
+                        logger.error(f"upload_url({part_info_item.upload_url}) expired")
+                    progress_bar.update(len(data))
+        self.complete_upload(file_id=file_id, upload_id=part_info["upload_id"])
 
 
 class RecycleAndDelete(FileUpload):

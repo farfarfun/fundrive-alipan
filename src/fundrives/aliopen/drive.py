@@ -109,13 +109,19 @@ class FileList(UserInfo):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def get_file_list(self, parent_file_id, limit=100, marker=None, order_by="name"):
+    def get_file_list(
+        self, parent_file_id, limit=100, marker=None, order_by="name", type="all"
+    ):
+        """
+        type		选填	all | file | folder
+        """
         payload = {
             "drive_id": self.drive_id,
             "parent_file_id": parent_file_id,
             "limit": limit,
             "marker": marker,
             "order_by": order_by,
+            "type": type,
         }
         return self.post("/adrive/v1.0/openFile/list", payload=payload)
 

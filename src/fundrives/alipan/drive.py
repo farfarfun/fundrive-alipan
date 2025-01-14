@@ -275,9 +275,11 @@ class FileUpload(FileInfo):
                 for i in range(len(part_info["part_info_list"])):
                     part_info_item = part_info["part_info_list"][i]
                     data = f.read(chunk_size)
-                    resp = requests.put(data=data, url=part_info_item.upload_url)
+                    resp = requests.put(data=data, url=part_info_item["upload_url"])
                     if resp.status_code == 403:
-                        logger.error(f"upload_url({part_info_item.upload_url}) expired")
+                        logger.error(
+                            f"upload_url({part_info_item['upload_url']}) expired"
+                        )
                     progress_bar.update(len(data))
         self.complete_upload(file_id=file_id, upload_id=part_info["upload_id"])
 

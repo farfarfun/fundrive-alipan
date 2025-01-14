@@ -1,4 +1,4 @@
 from .auth import AliPanAuth
-from .drive import AlipanManage
+from .drive import AliOpenManage
 
-__all__ = ["AliPanAuth", "AlipanManage"]
+__all__ = ["AliPanAuth", "AliOpenManage"]

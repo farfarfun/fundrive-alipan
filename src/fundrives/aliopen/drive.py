@@ -399,6 +399,6 @@ class FileShare(MoveAndCopy):
         return self.post(url, payload=payload)
 
 
-class AlipanManage(FileShare):
+class AliOpenManage(FileShare):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -2,7 +2,7 @@ import os
 from typing import List, Optional
 
 import requests
-from fundrives.alipan import AliPanAuth
+from .auth import AliPanAuth
 from funfile import file_tqdm_bar
 from funget import simple_download, single_upload
 from funsecret import read_secret

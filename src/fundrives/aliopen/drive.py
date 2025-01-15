@@ -2,11 +2,12 @@ import os
 from typing import List, Optional
 
 import requests
-from .auth import AliPanAuth
 from funfile import file_tqdm_bar
 from funget import simple_download, single_upload
 from funsecret import read_secret
 from funutil import getLogger
+
+from .auth import AliPanAuth
 
 logger = getLogger("fundrive")
 
@@ -194,12 +195,12 @@ class FileInfo(FileList):
             body["expire_sec"] = expire_sec
         return self.post(url, payload=body)
 
-    def download_file(self, file_id, filepath="./"):
+    def download_file(self, file_id, filedir="./", filepath=None):
         file_info = self.get_file_details(file_id=file_id)
         file_url = self.get_file_download_url(file_id=file_id)
         simple_download(
             url=file_url["url"],
-            filepath=f"{filepath}/{file_info['name']}",
+            filepath=filepath or f"{filedir}/{file_info['name']}",
             filesize=file_url["size"],
         )
 

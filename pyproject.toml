@@ -1,13 +1,30 @@
 [project]
 name = "fundrive-alipan"
-version = "1.3.11"
+version = "1.3.12"
 description = "fundrive-alipan"
 readme = "README.md"
 requires-python = ">=3.7"
 dependencies = [ "funget>=1.0.45", "funutil>=1.0.19", "qrcode>=7.4.2",]
 [[project.authors]]
-name = "niuliangtao"
+name = "牛哥"
+email = "niuliangtao@qq.com"
+
+[[project.authors]]
+name = "farfarfun"
 email = "farfarfun@qq.com"
+
+[[project.maintainers]]
+name = "牛哥"
+email = "niuliangtao@qq.com"
+
+[[project.maintainers]]
+name = "farfarfun"
+email = "farfarfun@qq.com"
+
+[project.urls]
+Organization = "https://github.com/farfarfun"
+Repository = "https://github.com/farfarfun/fundrive-alipan"
+Releases = "https://github.com/farfarfun/fundrive-alipan/releases"
 
 [tool.setuptools]
 license-files = []

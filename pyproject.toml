@@ -3,8 +3,8 @@ name = "fundrive-alipan"
 version = "1.3.12"
 description = "fundrive-alipan"
 readme = "README.md"
-requires-python = ">=3.7"
-dependencies = [ "funget>=1.0.45", "funutil>=1.0.19", "qrcode>=7.4.2",]
+requires-python = ">=3.12"
+dependencies = [ "nltget>=1.1.62", "funutil>=1.0.19", "qrcode>=7.4.2",]
 [[project.authors]]
 name = "牛哥"
 email = "niuliangtao@qq.com"

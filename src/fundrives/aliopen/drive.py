@@ -2,9 +2,9 @@ import os
 from typing import List, Optional
 
 import requests
-from funfile import file_tqdm_bar
-from funget import simple_download, single_upload
-from funsecret import read_secret
+from nltfile import file_tqdm_bar
+from nltget import simple_download, single_upload
+from nltsecret import read_secret
 from funutil import getLogger
 
 from .auth import AliPanAuth

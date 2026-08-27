@@ -27,3 +27,6 @@ Repository = "https://github.com/farfarfun/fundrive-alipan"
 Releases = "https://github.com/farfarfun/fundrive-alipan/releases"
 
 [tool.setuptools]
+
+[dependency-groups]
+dev = ["pytest>=7.0"]

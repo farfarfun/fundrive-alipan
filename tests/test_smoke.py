@@ -21,11 +21,11 @@ def test_import_top_level_package():
 
 def test_import_aliopen_submodule():
     """子包 fundrives.aliopen 及其公开符号可以正常导入。"""
-    import fundrives.aliopen as aliopen
+    from fundrives import aliopen
 
     assert hasattr(aliopen, "AliPanAuth")
     assert hasattr(aliopen, "AliOpenManage")
-    assert aliopen.__all__ == ["AliPanAuth", "AliOpenManage"]
+    assert aliopen.__all__ == ["AliOpenManage", "AliPanAuth"]
 
 
 def test_import_auth_and_drive_modules():
@@ -147,16 +147,23 @@ class TestAliOpenManage:
             response.json.return_value = {"items": []}
             return response
 
-        with mock.patch.object(
-            AliPanAuth, "get_access_token", return_value={"access_token": "tok-123"}
-        ), mock.patch("fundrives.aliopen.drive.requests.request", side_effect=fake_request):
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok-123"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+        ):
             result = manage.get_file_list(parent_file_id="root")
 
         assert result == {"items": []}
         assert captured["method"] == "post"
         # 注意：Base._request 用 f"{base_url}/{uri}" 拼接，当 uri 以 "/" 开头时
         # 会产生双斜杠（预置的小瑕疵，不在本次冒烟测试修复范围内，这里按实际行为断言）。
-        assert captured["url"] == "https://openapi.alipan.com//adrive/v1.0/openFile/list"
+        assert (
+            captured["url"] == "https://openapi.alipan.com//adrive/v1.0/openFile/list"
+        )
         assert captured["json"]["drive_id"] == "drive-xyz"
         assert captured["json"]["parent_file_id"] == "root"
 
@@ -174,12 +181,16 @@ class TestAliOpenManage:
             }
             return response
 
-        with mock.patch(
-            "fundrives.aliopen.drive.read_secret", return_value="dummy-secret-value"
-        ), mock.patch.object(
-            AliPanAuth, "get_access_token", return_value={"access_token": "tok-123"}
-        ), mock.patch(
-            "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+        with (
+            mock.patch(
+                "fundrives.aliopen.drive.read_secret", return_value="dummy-secret-value"
+            ),
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok-123"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
         ):
             manage.login(
                 client_id="cid", client_secret="csecret", refresh_token="rtoken"
@@ -196,3 +207,211 @@ class TestAliOpenManage:
 def test_no_cli_entry_points_declared():
     """当前 pyproject.toml 未声明 [project.scripts]，因此没有 CLI 需要冒烟测试。"""
     assert True
+
+
+def _mocked_manage(drive_id: str = "drive-xyz"):
+    """构造一个已完成鉴权打桩的 AliOpenManage 实例，避免真实网络请求。"""
+    from fundrives.aliopen import AliOpenManage, AliPanAuth
+
+    manage = AliOpenManage(drive_id=drive_id)
+    manage.auth = AliPanAuth(client_id="cid", client_secret="csecret")
+    return manage
+
+
+class TestPublicApiNormalAndEdgeCases:
+    """覆盖公开 API 的正常路径与边界，网络与鉴权均通过 mock 隔离。"""
+
+    def test_file_search_builds_expected_payload(self):
+        from fundrives.aliopen import AliPanAuth
+
+        manage = _mocked_manage()
+        captured = {}
+
+        def fake_request(method, url, json=None, headers=None, **kwargs):
+            captured["url"] = url
+            captured["json"] = json
+            response = mock.Mock()
+            response.json.return_value = {"items": []}
+            return response
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+        ):
+            result = manage.file_search(query="name = 'a.txt'")
+
+        assert result == {"items": []}
+        assert captured["json"]["query"] == "name = 'a.txt'"
+
+    def test_get_starred_list_builds_expected_payload(self):
+        from fundrives.aliopen import AliPanAuth
+
+        manage = _mocked_manage()
+
+        def fake_request(method, url, json=None, headers=None, **kwargs):
+            response = mock.Mock()
+            response.json.return_value = {"items": []}
+            return response
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+        ):
+            result = manage.get_starred_list(limit=5)
+
+        assert result == {"items": []}
+
+    def test_create_share_without_password_omits_share_pwd(self):
+        """create_share 不再有硬编码默认提取码，未传时 payload 不应包含 sharePwd。"""
+        from fundrives.aliopen import AliPanAuth
+
+        manage = _mocked_manage()
+        captured = {}
+
+        def fake_request(method, url, json=None, headers=None, **kwargs):
+            captured["json"] = json
+            response = mock.Mock()
+            response.json.return_value = {"share_url": "https://example.com/s/abc"}
+            return response
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+        ):
+            manage.create_share(file_id_list=["f1"])
+
+        assert "sharePwd" not in captured["json"]
+
+    def test_create_share_with_explicit_password(self):
+        from fundrives.aliopen import AliPanAuth
+
+        manage = _mocked_manage()
+        captured = {}
+
+        def fake_request(method, url, json=None, headers=None, **kwargs):
+            captured["json"] = json
+            response = mock.Mock()
+            response.json.return_value = {"share_url": "https://example.com/s/abc"}
+            return response
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+        ):
+            manage.create_share(file_id_list=["f1"], share_pwd="ab12")
+
+        assert captured["json"]["sharePwd"] == "ab12"
+
+    def test_move_and_copy_and_delete_build_expected_payloads(self):
+        from fundrives.aliopen import AliPanAuth
+
+        manage = _mocked_manage()
+        captured = []
+
+        def fake_request(method, url, json=None, headers=None, **kwargs):
+            captured.append((url, json))
+            response = mock.Mock()
+            response.json.return_value = {"ok": True}
+            return response
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+        ):
+            manage.move_file(file_id="f1", to_parent_file_id="root")
+            manage.copy_file(file_id="f1", to_parent_file_id="root")
+            manage.delete_file(file_id="f1")
+
+        assert all(json_body["file_id"] == "f1" for _, json_body in captured)
+
+    def test_download_file_uses_download_url_and_size(self):
+        from fundrives.aliopen import AliPanAuth
+
+        manage = _mocked_manage()
+
+        def fake_post(url, payload=None, *args, **kwargs):
+            if url == "/adrive/v1.0/openFile/get":
+                return {"name": "demo.txt"}
+            if url == "/adrive/v1.0/openFile/getDownloadUrl":
+                return {"url": "https://example.com/demo.txt", "size": 1024}
+            raise AssertionError(f"unexpected url: {url}")
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch.object(manage, "post", side_effect=fake_post),
+            mock.patch("fundrives.aliopen.drive.simple_download") as mocked_download,
+        ):
+            manage.download_file(file_id="f1", filedir="/tmp")
+
+        mocked_download.assert_called_once_with(
+            url="https://example.com/demo.txt",
+            filepath="/tmp/demo.txt",
+            filesize=1024,
+        )
+
+    def test_base_request_raises_on_invalid_json_response(self):
+        """响应无法解析为 JSON 时应抛出 AliOpenRequestError，而不是静默返回 None。"""
+        from fundrives.aliopen import AliPanAuth
+        from fundrives.aliopen.drive import AliOpenRequestError
+
+        manage = _mocked_manage()
+
+        def fake_request(method, url, json=None, headers=None, **kwargs):
+            response = mock.Mock()
+            response.status_code = 500
+            response.text = "internal error"
+            response.json.side_effect = ValueError("invalid json")
+            return response
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+            pytest.raises(AliOpenRequestError),
+        ):
+            manage.get_file_list(parent_file_id="root")
+
+    def test_auth_request_wraps_network_error(self):
+        """AliPanAuth._request 网络异常时应抛出 AliPanAuthError 并保留异常链。"""
+        import requests
+
+        from fundrives.aliopen import AliPanAuth
+        from fundrives.aliopen.auth import AliPanAuthError
+
+        auth = AliPanAuth(client_id="cid", client_secret="csecret")
+        with (
+            mock.patch.object(
+                auth._session,
+                "request",
+                side_effect=requests.ConnectionError("boom"),
+            ),
+            pytest.raises(AliPanAuthError) as exc_info,
+        ):
+            auth._request("GET", "https://openapi.alipan.com/oauth/users/info")
+
+        assert exc_info.value.__cause__ is not None

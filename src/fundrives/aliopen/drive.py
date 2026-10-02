@@ -1,5 +1,6 @@
 import os
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 from farlog import getLogger
@@ -450,8 +451,9 @@ class FileUpload(FileInfo):
                 data = f.read(chunk_size)
                 resp = requests.put(data=data, url=part_info_item["upload_url"])
                 if resp.status_code == 403:
-                    logger.error(
-                        f"upload_url({part_info_item['upload_url']}) expired, "
+                    upload_host = urlsplit(part_info_item["upload_url"]).hostname
+                    raise AliOpenRequestError(
+                        f"upload URL rejected: status_code=403, host={upload_host}, "
                         f"file_id={file_id}, filepath={filepath}"
                     )
                 progress_bar.update(len(data))

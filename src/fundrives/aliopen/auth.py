@@ -34,7 +34,18 @@ class AliPanAuth:
         :param refresh_token: 刷新令牌，如未提供则需要通过 :meth:`qrcode_login` 获取
         """
         self.openapi_domain = "https://openapi.alipan.com"
-        assert client_id and client_secret, "client_id and client_secret must be set"
+        missing_credentials = [
+            name
+            for name, value in (
+                ("client_id", client_id),
+                ("client_secret", client_secret),
+            )
+            if not value
+        ]
+        if missing_credentials:
+            raise AliPanAuthError(
+                f"missing required credentials: {', '.join(missing_credentials)}"
+            )
 
         self._session = requests.Session()
         self._client_id = client_id

@@ -53,11 +53,21 @@ class TestAliPanAuth:
         assert auth.openapi_domain == "https://openapi.alipan.com"
 
     def test_construct_without_credentials_raises(self):
-        """client_id / client_secret 缺失时应立即抛出 AssertionError。"""
+        """client_id / client_secret 缺失时应抛出领域异常并指出缺失项。"""
         from fundrives.aliopen import AliPanAuth
+        from fundrives.aliopen.auth import AliPanAuthError
 
-        with pytest.raises(AssertionError):
+        with pytest.raises(AliPanAuthError, match="client_id, client_secret"):
             AliPanAuth(client_id="", client_secret="")
+
+    def test_construct_identifies_single_missing_credential(self):
+        from fundrives.aliopen import AliPanAuth
+        from fundrives.aliopen.auth import AliPanAuthError
+
+        with pytest.raises(AliPanAuthError, match="client_secret") as exc_info:
+            AliPanAuth(client_id="cid", client_secret="")
+
+        assert "client_id" not in str(exc_info.value)
 
     def test_qrcode_url_is_pure_string_formatting(self):
         """qrcode_url 只是字符串拼接，不涉及网络。"""
@@ -415,3 +425,33 @@ class TestPublicApiNormalAndEdgeCases:
             auth._request("GET", "https://openapi.alipan.com/oauth/users/info")
 
         assert exc_info.value.__cause__ is not None
+
+    def test_chunk_upload_403_stops_without_exposing_signed_url(self, tmp_path):
+        from fundrives.aliopen.drive import AliOpenRequestError
+
+        manage = _mocked_manage()
+        filepath = tmp_path / "demo.bin"
+        filepath.write_bytes(b"data")
+        signed_url = "https://upload.example.com/part?signature=secret-token"
+        manage.create_file = mock.Mock(
+            return_value={
+                "upload_id": "upload-1",
+                "part_info_list": [{"upload_url": signed_url}],
+            }
+        )
+        manage.complete_upload = mock.Mock()
+        response = mock.Mock(status_code=403)
+
+        with (
+            mock.patch("fundrives.aliopen.drive.requests.put", return_value=response),
+            mock.patch("fundrives.aliopen.drive.file_tqdm_bar") as progress,
+            pytest.raises(AliOpenRequestError) as exc_info,
+        ):
+            progress.return_value.__enter__.return_value = mock.Mock()
+            manage.upload_file(file_id="parent-1", filepath=str(filepath))
+
+        error_message = str(exc_info.value)
+        assert "host=upload.example.com" in error_message
+        assert "signature" not in error_message
+        assert "secret-token" not in error_message
+        manage.complete_upload.assert_not_called()

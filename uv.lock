@@ -416,6 +416,7 @@ dependencies = [
     { name = "funget" },
     { name = "funsecret" },
     { name = "qrcode" },
+    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -431,6 +432,7 @@ requires-dist = [
     { name = "funget", specifier = ">=1.1.63" },
     { name = "funsecret", specifier = ">=1.4.84" },
     { name = "qrcode", specifier = ">=7.4.2" },
+    { name = "requests", specifier = ">=2.32.0" },
 ]
 
 [package.metadata.requires-dev]

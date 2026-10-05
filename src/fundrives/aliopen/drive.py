@@ -17,6 +17,24 @@ class AliOpenRequestError(Exception):
     """阿里云盘开放平台接口调用相关异常，携带请求方法、URL 与响应上下文。"""
 
 
+# 默认请求超时（连接秒数, 读取秒数）。不设超时时服务端不响应会让整个进程挂死。
+DEFAULT_TIMEOUT: tuple[int, int] = (10, 60)
+
+# 异常信息里最多携带多少字符的响应正文，避免把超长正文整段塞进日志
+_MAX_BODY_IN_ERROR = 500
+
+
+def _brief(text: str | None, limit: int = _MAX_BODY_IN_ERROR) -> str:
+    """截断过长的响应正文，供异常信息使用。
+
+    :param text: 原始响应正文
+    :param limit: 保留的最大字符数
+    :return: 截断后的文本
+    """
+    text = "" if text is None else str(text)
+    return text if len(text) <= limit else f"{text[:limit]}...(truncated)"
+
+
 class Base:
     """阿里云盘开放平台请求基类，封装鉴权、通用请求方法。"""
 
@@ -52,6 +70,7 @@ class Base:
         uri: str,
         payload: dict[str, Any] | None = None,
         *args: Any,
+        timeout: tuple[int, int] | int | None = None,
         **kwargs: Any,
     ) -> Any:
         """发起底层 HTTP 请求并解析 JSON 响应。
@@ -59,9 +78,11 @@ class Base:
         :param method: HTTP 方法，如 ``get``/``post``
         :param uri: 相对路径或完整 URL（以 ``https://`` 开头时视为完整 URL）
         :param payload: JSON 请求体
+        :param timeout: 请求超时，默认 :data:`DEFAULT_TIMEOUT`
         :return: 响应体解析出的 JSON 数据
-        :raises AliOpenRequestError: 响应无法解析为 JSON，异常信息带上请求方法、
-            URL、HTTP 状态码及响应文本，便于定位问题
+        :raises AliOpenRequestError: 网络请求失败、HTTP 状态码非 2xx、或响应无法
+            解析为 JSON；异常信息统一带上请求方法、URL、HTTP 状态码与（截断后的）
+            响应正文，并通过 ``raise ... from err`` 保留原始异常链
         """
         method = method.lower()
 
@@ -69,15 +90,36 @@ class Base:
             url = uri
         else:
             url = f"{self.base_url}/{uri}"
-        response = requests.request(
-            method, url, json=payload, headers=self.get_header()
-        )
+
+        try:
+            response = requests.request(
+                method,
+                url,
+                json=payload,
+                headers=self.get_header(),
+                timeout=timeout or DEFAULT_TIMEOUT,
+            )
+        except requests.RequestException as e:
+            # 连接失败、超时、DNS 错误等：原始异常只有一个裸 URL，没有业务上下文
+            raise AliOpenRequestError(
+                f"request failed: method={method}, url={url}: {type(e).__name__}: {e}"
+            ) from e
+
+        if response.status_code >= 400:
+            # 开放平台在 4xx/5xx 时同样会返回 JSON 错误体，照原样返回会让调用方
+            # 把失败当成功（拿不到字段再抛 KeyError），必须在这里显式失败。
+            raise AliOpenRequestError(
+                f"request failed: method={method}, url={url}, "
+                f"status_code={response.status_code}, response={_brief(response.text)}"
+            )
+
         try:
             return response.json()
         except ValueError as e:
             raise AliOpenRequestError(
                 f"invalid JSON response: method={method}, url={url}, "
-                f"status_code={response.status_code}, response={response.text}"
+                f"status_code={response.status_code}, "
+                f"response={_brief(response.text)}"
             ) from e
 
     def post(
@@ -370,16 +412,23 @@ class FileUpload(FileInfo):
         }
         return self.post(url, payload=data)
 
-    def get_upload_url(self, file_id: str, upload_id: str) -> requests.Response:
+    def get_upload_url(self, file_id: str, upload_id: str) -> Any:
         """获取分片上传地址。
 
         :param file_id: 文件 file_id
         :param upload_id: 上传任务 upload_id
-        :return: ``requests.Response`` 对象
+        :return: 包含 ``part_info_list`` 的响应 JSON
+        :raises AliOpenRequestError: 请求失败或响应不是合法 JSON
+
+        .. note::
+            历史实现是 ``requests.post(url, params=data)``，``url`` 是相对路径
+            ``/adrive/v1.0/openFile/getUploadUrl``，``requests`` 会直接抛
+            ``MissingSchema: Invalid URL ... No scheme supplied``，而且既没带
+            ``Authorization`` 头也没带 JSON body，这个方法此前 100% 不可用。
         """
         url = "/adrive/v1.0/openFile/getUploadUrl"
         data = {"drive_id": self.drive_id, "file_id": file_id, "upload_id": upload_id}
-        return requests.post(url, params=data)
+        return self.post(url, payload=data)
 
     def list_uploaded_parts(self, file_id: str, upload_id: str) -> Any:
         """列出已上传的分片。
@@ -420,10 +469,12 @@ class FileUpload(FileInfo):
                 "Content-Type": "application/octet-stream",
             }
         )
+        # 这里必须用上面补过 Content-Length / Content-Type 的 headers；
+        # 历史实现又调了一次 get_header()，上面那几行等于白写。
         single_upload(
             url=info["part_info_list"][0]["upload_url"],
             filepath=filepath,
-            headers=self.get_header(),
+            headers=headers,
         )
         self.complete_upload(file_id=info["file_id"], upload_id=info["upload_id"])
 
@@ -436,9 +487,13 @@ class FileUpload(FileInfo):
         :param filepath: 本地文件路径
         :param chunk_size: 每个分片大小（字节）
         :return: 无返回值
+        :raises AliOpenRequestError: 创建文件失败，或某个分片上传返回非 2xx
         """
         filesize = os.path.getsize(filepath)
         part_info = self.create_file(file_id, os.path.basename(filepath), size=filesize)
+        # create_file 返回的是**新文件**的 file_id，后面 complete_upload 必须用它；
+        # 传入的 file_id 是父目录，用父目录 id 去 complete 必然失败。
+        new_file_id = part_info["file_id"]
         with (
             open(filepath, "rb") as f,
             file_tqdm_bar(
@@ -449,15 +504,32 @@ class FileUpload(FileInfo):
             for i in range(len(part_info["part_info_list"])):
                 part_info_item = part_info["part_info_list"][i]
                 data = f.read(chunk_size)
-                resp = requests.put(data=data, url=part_info_item["upload_url"])
-                if resp.status_code == 403:
-                    upload_host = urlsplit(part_info_item["upload_url"]).hostname
+                upload_host = urlsplit(part_info_item["upload_url"]).hostname
+                try:
+                    resp = requests.put(
+                        data=data,
+                        url=part_info_item["upload_url"],
+                        timeout=DEFAULT_TIMEOUT,
+                    )
+                except requests.RequestException as e:
                     raise AliOpenRequestError(
-                        f"upload URL rejected: status_code=403, host={upload_host}, "
-                        f"file_id={file_id}, filepath={filepath}"
+                        f"upload part failed: part={i + 1}/"
+                        f"{len(part_info['part_info_list'])}, host={upload_host}, "
+                        f"file_id={new_file_id}, upload_id={part_info['upload_id']}, "
+                        f"filepath={filepath}: {type(e).__name__}: {e}"
+                    ) from e
+                # 原实现只拦 403，4xx/5xx 的其它失败会被当成上传成功，
+                # 最后 complete 出来一个内容残缺的文件。
+                if resp.status_code >= 400:
+                    raise AliOpenRequestError(
+                        f"upload part rejected: status_code={resp.status_code}, "
+                        f"part={i + 1}/{len(part_info['part_info_list'])}, "
+                        f"host={upload_host}, file_id={new_file_id}, "
+                        f"upload_id={part_info['upload_id']}, filepath={filepath}, "
+                        f"response={_brief(resp.text)}"
                     )
                 progress_bar.update(len(data))
-        self.complete_upload(file_id=file_id, upload_id=part_info["upload_id"])
+        self.complete_upload(file_id=new_file_id, upload_id=part_info["upload_id"])
 
 
 class RecycleAndDelete(FileUpload):

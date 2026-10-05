@@ -15,6 +15,10 @@ class AliPanAuthError(Exception):
     """阿里云盘 OAuth 鉴权相关异常，携带请求方法与 URL 等定位上下文。"""
 
 
+# 默认请求超时（连接秒数, 读取秒数）。不设超时时服务端不响应会让扫码登录永久卡住。
+DEFAULT_TIMEOUT: tuple[int, int] = (10, 60)
+
+
 class AliPanAuth:
     """阿里云盘开放平台 OAuth 鉴权客户端。
 
@@ -61,6 +65,7 @@ class AliPanAuth:
         data: str | bytes | dict[str, str] | Any = None,
         json: Any = None,
         files: dict[str, Any] | None = None,
+        timeout: tuple[int, int] | int | None = None,
         **kwargs: Any,
     ) -> requests.Response:
         """发起底层 HTTP 请求。
@@ -72,9 +77,11 @@ class AliPanAuth:
         :param data: 表单/原始请求体
         :param json: JSON 请求体
         :param files: 文件上传内容
+        :param timeout: 请求超时，默认 :data:`DEFAULT_TIMEOUT`
         :return: ``requests.Response`` 对象
-        :raises AliPanAuthError: 请求发送失败（网络错误、超时等），异常信息包含
-            请求方法与 URL，并通过 ``raise ... from err`` 保留原始异常链
+        :raises AliPanAuthError: 请求发送失败（网络错误、超时等）或 HTTP 状态码
+            非 2xx；异常信息包含请求方法、URL 与状态码，并通过
+            ``raise ... from err`` 保留原始异常链
         """
         if not headers:
             pcs_ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
@@ -95,13 +102,24 @@ class AliPanAuth:
                 data=data,
                 json=json,
                 files=files,
+                timeout=timeout or DEFAULT_TIMEOUT,
                 **kwargs,
             )
-            return resp
         except requests.RequestException as err:
             raise AliPanAuthError(
-                f"AliOpenAuth._request failed: method={method}, url={url}"
+                f"AliOpenAuth._request failed: method={method}, url={url}: "
+                f"{type(err).__name__}: {err}"
             ) from err
+
+        if resp.status_code >= 400:
+            # OAuth 失败（client_secret 错误、refresh_token 过期）同样返回 JSON
+            # 错误体，不显式失败的话上层会在取 access_token 时报 KeyError，
+            # 完全看不出真实原因。注意这里不回显响应正文，避免把凭据写进日志。
+            raise AliPanAuthError(
+                f"AliOpenAuth._request failed: method={method}, url={url}, "
+                f"status_code={resp.status_code}"
+            )
+        return resp
 
     def qrcode_url(self, sid: str) -> str:
         """根据登录会话 id 生成二维码扫码跳转地址。

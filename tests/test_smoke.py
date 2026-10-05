@@ -153,7 +153,7 @@ class TestAliOpenManage:
             captured["method"] = method
             captured["url"] = url
             captured["json"] = json
-            response = mock.Mock()
+            response = mock.Mock(status_code=200)
             response.json.return_value = {"items": []}
             return response
 
@@ -184,7 +184,7 @@ class TestAliOpenManage:
         manage = AliOpenManage()
 
         def fake_request(method, url, json=None, headers=None, **kwargs):
-            response = mock.Mock()
+            response = mock.Mock(status_code=200)
             response.json.return_value = {
                 "default_drive_id": "default-drive",
                 "resource_drive_id": "resource-drive",
@@ -240,7 +240,7 @@ class TestPublicApiNormalAndEdgeCases:
         def fake_request(method, url, json=None, headers=None, **kwargs):
             captured["url"] = url
             captured["json"] = json
-            response = mock.Mock()
+            response = mock.Mock(status_code=200)
             response.json.return_value = {"items": []}
             return response
 
@@ -263,7 +263,7 @@ class TestPublicApiNormalAndEdgeCases:
         manage = _mocked_manage()
 
         def fake_request(method, url, json=None, headers=None, **kwargs):
-            response = mock.Mock()
+            response = mock.Mock(status_code=200)
             response.json.return_value = {"items": []}
             return response
 
@@ -288,7 +288,7 @@ class TestPublicApiNormalAndEdgeCases:
 
         def fake_request(method, url, json=None, headers=None, **kwargs):
             captured["json"] = json
-            response = mock.Mock()
+            response = mock.Mock(status_code=200)
             response.json.return_value = {"share_url": "https://example.com/s/abc"}
             return response
 
@@ -312,7 +312,7 @@ class TestPublicApiNormalAndEdgeCases:
 
         def fake_request(method, url, json=None, headers=None, **kwargs):
             captured["json"] = json
-            response = mock.Mock()
+            response = mock.Mock(status_code=200)
             response.json.return_value = {"share_url": "https://example.com/s/abc"}
             return response
 
@@ -336,7 +336,7 @@ class TestPublicApiNormalAndEdgeCases:
 
         def fake_request(method, url, json=None, headers=None, **kwargs):
             captured.append((url, json))
-            response = mock.Mock()
+            response = mock.Mock(status_code=200)
             response.json.return_value = {"ok": True}
             return response
 
@@ -389,7 +389,7 @@ class TestPublicApiNormalAndEdgeCases:
         manage = _mocked_manage()
 
         def fake_request(method, url, json=None, headers=None, **kwargs):
-            response = mock.Mock()
+            response = mock.Mock(status_code=200)
             response.status_code = 500
             response.text = "internal error"
             response.json.side_effect = ValueError("invalid json")
@@ -435,12 +435,13 @@ class TestPublicApiNormalAndEdgeCases:
         signed_url = "https://upload.example.com/part?signature=secret-token"
         manage.create_file = mock.Mock(
             return_value={
+                "file_id": "new-file-1",
                 "upload_id": "upload-1",
                 "part_info_list": [{"upload_url": signed_url}],
             }
         )
         manage.complete_upload = mock.Mock()
-        response = mock.Mock(status_code=403)
+        response = mock.Mock(status_code=403, text="AccessDenied")
 
         with (
             mock.patch("fundrives.aliopen.drive.requests.put", return_value=response),
@@ -454,4 +455,203 @@ class TestPublicApiNormalAndEdgeCases:
         assert "host=upload.example.com" in error_message
         assert "signature" not in error_message
         assert "secret-token" not in error_message
+        manage.complete_upload.assert_not_called()
+
+
+class TestNamespacePackageLayout:
+    """``fundrives`` 必须保持 PEP 420 隐式命名空间包。
+
+    四个发行包（fundrive-alipan / -baidu / -lanzou / -quark）共用这个顶层名字，
+    任何一个加上 ``src/fundrives/__init__.py`` 都会把它变成常规包，屏蔽兄弟插件，
+    并让多个 wheel 争抢同一个文件。历史上 e5ffc66 删过一次、a21ddbd 又加了回来，
+    这条测试用来挡住下一次回归。
+    """
+
+    def test_namespace_dir_has_no_init(self):
+        import pathlib
+
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        assert not (repo_root / "src" / "fundrives" / "__init__.py").exists()
+
+    def test_namespace_package_has_no_file_attribute(self):
+        import fundrives
+
+        # 隐式命名空间包没有 __file__；常规包一定有
+        assert getattr(fundrives, "__file__", None) is None
+
+    def test_py_typed_lives_in_real_package_root(self):
+        import pathlib
+
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        assert (repo_root / "src" / "fundrives" / "aliopen" / "py.typed").exists()
+        assert not (repo_root / "src" / "fundrives" / "py.typed").exists()
+
+    def test_version_exposed_on_subpackage(self):
+        from fundrives import aliopen
+
+        assert isinstance(aliopen.__version__, str)
+        assert aliopen.__version__
+
+
+class TestRequestErrorHandling:
+    """SPEC §8.2：外部调用失败必须抛领域异常并带上可定位的上下文。"""
+
+    def test_non_2xx_raises_with_context(self):
+        from fundrives.aliopen import AliPanAuth
+        from fundrives.aliopen.drive import AliOpenRequestError
+
+        manage = _mocked_manage()
+        response = mock.Mock(status_code=500, text="internal error")
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", return_value=response
+            ),
+            pytest.raises(AliOpenRequestError) as exc_info,
+        ):
+            manage.get_file_list(parent_file_id="root")
+
+        message = str(exc_info.value)
+        assert "status_code=500" in message
+        assert "openFile/list" in message
+
+    def test_network_error_wrapped_and_chained(self):
+        import requests
+
+        from fundrives.aliopen import AliPanAuth
+        from fundrives.aliopen.drive import AliOpenRequestError
+
+        manage = _mocked_manage()
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request",
+                side_effect=requests.ConnectTimeout("boom"),
+            ),
+            pytest.raises(AliOpenRequestError) as exc_info,
+        ):
+            manage.get_file_list(parent_file_id="root")
+
+        assert isinstance(exc_info.value.__cause__, requests.RequestException)
+        assert "ConnectTimeout" in str(exc_info.value)
+
+    def test_request_sets_timeout(self):
+        from fundrives.aliopen import AliPanAuth
+        from fundrives.aliopen.drive import DEFAULT_TIMEOUT
+
+        manage = _mocked_manage()
+        captured = {}
+
+        def fake_request(method, url, json=None, headers=None, **kwargs):
+            captured.update(kwargs)
+            return mock.Mock(status_code=200, **{"json.return_value": {}})
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+        ):
+            manage.get_file_list(parent_file_id="root")
+
+        assert captured["timeout"] == DEFAULT_TIMEOUT
+
+
+class TestUploadContract:
+    """上传链路上两个此前必错的点。"""
+
+    def test_get_upload_url_uses_absolute_url_and_auth(self):
+        """历史实现用相对路径调 requests.post，必抛 MissingSchema。"""
+        from fundrives.aliopen import AliPanAuth
+
+        manage = _mocked_manage()
+        captured = {}
+
+        def fake_request(method, url, json=None, headers=None, **kwargs):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return mock.Mock(status_code=200, **{"json.return_value": {"ok": True}})
+
+        with (
+            mock.patch.object(
+                AliPanAuth, "get_access_token", return_value={"access_token": "tok"}
+            ),
+            mock.patch(
+                "fundrives.aliopen.drive.requests.request", side_effect=fake_request
+            ),
+        ):
+            result = manage.get_upload_url(file_id="f-1", upload_id="u-1")
+
+        assert result == {"ok": True}
+        assert captured["url"].startswith("https://")
+        assert "getUploadUrl" in captured["url"]
+        assert captured["json"]["file_id"] == "f-1"
+        assert captured["json"]["upload_id"] == "u-1"
+        assert "Authorization" in captured["headers"]
+
+    def test_complete_upload_uses_new_file_id_not_parent(self, tmp_path):
+        """complete_upload 必须用 create_file 返回的新 file_id，不是父目录 id。"""
+        manage = _mocked_manage()
+        filepath = tmp_path / "demo.bin"
+        filepath.write_bytes(b"data")
+        manage.create_file = mock.Mock(
+            return_value={
+                "file_id": "new-file-1",
+                "upload_id": "upload-1",
+                "part_info_list": [{"upload_url": "https://upload.example.com/part"}],
+            }
+        )
+        manage.complete_upload = mock.Mock()
+
+        with (
+            mock.patch(
+                "fundrives.aliopen.drive.requests.put",
+                return_value=mock.Mock(status_code=200, text=""),
+            ),
+            mock.patch("fundrives.aliopen.drive.file_tqdm_bar") as progress,
+        ):
+            progress.return_value.__enter__.return_value = mock.Mock()
+            manage.upload_file(file_id="parent-1", filepath=str(filepath))
+
+        manage.complete_upload.assert_called_once_with(
+            file_id="new-file-1", upload_id="upload-1"
+        )
+
+    def test_non_403_upload_failure_also_raises(self, tmp_path):
+        """原实现只拦 403，其它失败会被当成上传成功。"""
+        from fundrives.aliopen.drive import AliOpenRequestError
+
+        manage = _mocked_manage()
+        filepath = tmp_path / "demo.bin"
+        filepath.write_bytes(b"data")
+        manage.create_file = mock.Mock(
+            return_value={
+                "file_id": "new-file-1",
+                "upload_id": "upload-1",
+                "part_info_list": [{"upload_url": "https://upload.example.com/part"}],
+            }
+        )
+        manage.complete_upload = mock.Mock()
+
+        with (
+            mock.patch(
+                "fundrives.aliopen.drive.requests.put",
+                return_value=mock.Mock(status_code=500, text="oops"),
+            ),
+            mock.patch("fundrives.aliopen.drive.file_tqdm_bar") as progress,
+            pytest.raises(AliOpenRequestError) as exc_info,
+        ):
+            progress.return_value.__enter__.return_value = mock.Mock()
+            manage.upload_file(file_id="parent-1", filepath=str(filepath))
+
+        assert "status_code=500" in str(exc_info.value)
         manage.complete_upload.assert_not_called()

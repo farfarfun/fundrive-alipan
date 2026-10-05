@@ -62,17 +62,13 @@ db.sqlite3
 db.sqlite3-journal
 *.db
 *.rar
+
+# 运行时文件与日志目录
 .run/
 logs/
 .idea/
 .vscode/
 node_modules/
-*.db
-*.rar
-
-# 运行时文件与日志目录
-.run/
-logs/
 
 # Flask stuff:
 instance/

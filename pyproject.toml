@@ -22,9 +22,9 @@ email = "niuliangtao@qq.com"
 name = "farfarfun"
 email = "farfarfun@qq.com"
 [project.urls]
-Organization = "https://github.com/farfarfun"
-Repository = "https://github.com/farfarfun/fundrive-alipan"
-Releases = "https://github.com/farfarfun/fundrive-alipan/releases"
+Organization = "https://github.com/farfarfun-fundrive"
+Repository = "https://github.com/farfarfun-fundrive/fundrive-alipan"
+Releases = "https://github.com/farfarfun-fundrive/fundrive-alipan/releases"
 
 [tool.setuptools]
 

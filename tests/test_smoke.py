@@ -77,9 +77,70 @@ class TestAliPanAuth:
         url = auth.qrcode_url("sid-123")
         assert url == "https://www.aliyundrive.com/o/oauth/authorize?sid=sid-123"
 
-    def test_qrcode_login_requires_real_network(self):
-        """qrcode_login 需要真实二维码扫描与轮询等待，跳过。"""
-        pytest.skip("需要真实凭据/真实扫码交互，跳过")
+    def test_qrcode_login_returns_token_after_scan_succeeds(self):
+        """二维码登录在轮询到 LoginSuccess 后用授权码换取 token。"""
+        from fundrives.aliopen import AliPanAuth
+
+        auth = AliPanAuth(client_id="cid", client_secret="csecret")
+        with (
+            mock.patch.object(auth, "get_qrcode_info", return_value={"sid": "sid-1"}),
+            mock.patch.object(
+                auth,
+                "scan_status",
+                side_effect=[
+                    {"status": "WaitLogin"},
+                    {"status": "LoginSuccess", "authCode": "code-1"},
+                ],
+            ),
+            mock.patch.object(
+                auth, "get_access_token", return_value={"access_token": "token-1"}
+            ) as get_access_token,
+            mock.patch("fundrives.aliopen.auth.time.sleep") as sleep,
+            mock.patch("fundrives.aliopen.auth.QRCode"),
+        ):
+            result = auth.qrcode_login()
+
+        assert result == {"access_token": "token-1"}
+        sleep.assert_has_calls([mock.call(2), mock.call(2)])
+        get_access_token.assert_called_once_with("code-1")
+
+    def test_qrcode_login_raises_after_polling_timeout(self):
+        """二维码在全部轮询周期均未成功时应超时，且不请求 token。"""
+        from fundrives.aliopen import AliPanAuth
+
+        auth = AliPanAuth(client_id="cid", client_secret="csecret")
+        with (
+            mock.patch.object(auth, "get_qrcode_info", return_value={"sid": "sid-1"}),
+            mock.patch.object(
+                auth, "scan_status", return_value={"status": "WaitLogin"}
+            ) as scan_status,
+            mock.patch.object(auth, "get_access_token") as get_access_token,
+            mock.patch("fundrives.aliopen.auth.time.sleep") as sleep,
+            mock.patch("fundrives.aliopen.auth.QRCode"),
+            pytest.raises(RuntimeError, match="qrcode scan timed out for sid=sid-1"),
+        ):
+            auth.qrcode_login()
+
+        assert scan_status.call_count == 60
+        assert sleep.call_count == 60
+        get_access_token.assert_not_called()
+
+    def test_qrcode_login_propagates_polling_error(self):
+        """轮询接口失败时应保留领域异常，避免伪装成扫码超时。"""
+        from fundrives.aliopen import AliPanAuth
+        from fundrives.aliopen.auth import AliPanAuthError
+
+        auth = AliPanAuth(client_id="cid", client_secret="csecret")
+        with (
+            mock.patch.object(auth, "get_qrcode_info", return_value={"sid": "sid-1"}),
+            mock.patch.object(
+                auth, "scan_status", side_effect=AliPanAuthError("status request failed")
+            ),
+            mock.patch("fundrives.aliopen.auth.time.sleep"),
+            mock.patch("fundrives.aliopen.auth.QRCode"),
+            pytest.raises(AliPanAuthError, match="status request failed"),
+        ):
+            auth.qrcode_login()
 
 
 class TestAliOpenManage:

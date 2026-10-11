@@ -42,12 +42,17 @@
 
 ## [1.3.15] - 2026-09-03
 
+### 破坏性变更
+
+- `create_share` 不再在未传入 `share_pwd` 时隐式使用提取码 `"6666"`。升级后，如需
+  受密码保护的分享链接，调用方必须显式传入 `share_pwd`；若要从配置读取密码，可先通过
+  `funsecret` 或环境变量读取，再将该值传给 `create_share`。未传入时将创建无提取码的链接。
+
 ### 修复
 
 - 日志迁移到组织自有包 `farlog`，函数缓存迁移到 `farcache`，移除对 `funutil` 的直接依赖
 - `AliPanAuth._request` 不再吞掉原始异常，改为抛出 `AliPanAuthError` 并保留异常链与请求上下文
 - `Base._request` JSON 解析失败时改为抛出 `AliOpenRequestError`（携带请求方法、URL、状态码、响应内容），不再静默返回 `None`
-- `create_share` 移除硬编码的默认分享提取码 `"6666"`，改为按需由调用方显式传入
 - 公开 API 类型标注统一改为 Python 3.10 原生泛型/联合类型写法（`str | None`、`list[str]`、`dict[...]`），移除 `typing.Optional/List/Dict/Union`
 - 补充公开类与方法的中文 docstring，明确用途、参数、返回值与异常行为
 

@@ -1,7 +1,7 @@
 # fundrive-alipan
 
 阿里云盘（AliOpenDrive）开放平台 Python SDK，封装扫码登录、文件列表/搜索、上传下载、
-移动复制、回收站与分享链接等常用能力，供 [fundrive](https://github.com/farfarfun-fundrive/fundrive)
+移动复制、回收站与分享链接等常用能力，供 [fundrive](https://github.com/farfarfun-drive/fundrive)
 及其他项目以统一接口接入阿里云盘。
 
 ## 安装

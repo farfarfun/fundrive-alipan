@@ -134,7 +134,9 @@ class TestAliPanAuth:
         with (
             mock.patch.object(auth, "get_qrcode_info", return_value={"sid": "sid-1"}),
             mock.patch.object(
-                auth, "scan_status", side_effect=AliPanAuthError("status request failed")
+                auth,
+                "scan_status",
+                side_effect=AliPanAuthError("status request failed"),
             ),
             mock.patch("fundrives.aliopen.auth.time.sleep"),
             mock.patch("fundrives.aliopen.auth.QRCode"),
